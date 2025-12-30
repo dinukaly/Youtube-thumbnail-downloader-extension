@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Thumbnail Downloader",
+  "name": "YouTube Thumbnail Viewer & Downloader + HD Image Saver",
   "version": "1.0",
-  "description": "Adds a download button to YouTube video thumbnails.",
+  "description": "Open YouTube thumbnails in a new tab with one click to view, save, or copy in full HD.",
   "content_scripts": [
     {
       "matches": ["*://www.youtube.com/*"],
@@ -11,8 +11,8 @@
     }
   ],
   "icons": {
-    "48": "icon.png",
-    "128": "icon.png"
+    "48": "favicon.png",
+    "128": "favicon.png"
   },
   "permissions": []
 }

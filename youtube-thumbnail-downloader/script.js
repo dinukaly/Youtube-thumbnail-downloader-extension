@@ -1,193 +1,246 @@
 (function () {
     'use strict';
     
-    console.log('YouTube Thumbnail Downloader extension loaded on', window.location.href);
+    // Use a Map instead of WeakSet for more reliable tracking
+    const processedIds = new Map();
     
-    const sleep = ms => new Promise(r => setTimeout(r, ms));
-    
-    function getVideoIdFromHref(href) {
-        try {
-            const u = new URL(href, location.origin);
-            const v = u.searchParams.get('v');
-            if (v && /^[\w-]{11}$/.test(v)) return v;
-            
-            
-            const match = href.match(/\/watch\?v=([\w-]{11})/);
+    // Improved video ID extraction with multiple patterns
+    function getVideoId(href) {
+        if (!href) return null;
+        
+        // Try multiple patterns to extract video ID
+        const patterns = [
+            /[?&]v=([\w-]{11})/, // Standard watch URL
+            /\/watch\?v=([\w-]{11})/, // Alternative format
+            /youtu\.be\/([\w-]{11})/, // Short URL format
+            /\/embed\/([\w-]{11})/ // Embed URL format
+        ];
+        
+        for (const pattern of patterns) {
+            const match = href.match(pattern);
             if (match) return match[1];
-        } catch {}
+        }
+        
         return null;
     }
     
-    function buildThumbs(id) {
+    // Thumbnail URL construction with fallback qualities
+    function getThumbnailUrls(videoId) {
         return [
-            { key: 'maxres', url: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg` },
-            { key: 'sd',     url: `https://i.ytimg.com/vi/${id}/sddefault.jpg` },
-            { key: 'hq',     url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg` },
-            { key: 'mq',     url: `https://i.ytimg.com/vi/${id}/mqdefault.jpg` },
-            { key: 'def',    url: `https://i.ytimg.com/vi/${id}/default.jpg` }
+            `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
+            `https://i.ytimg.com/vi/${videoId}/sddefault.jpg`,
+            `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
         ];
     }
     
-    function download(url, filename) {
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-    }
-    
+    // Enhanced download button creation
     function addDownloadButton(videoElement) {
-       
-        if (videoElement.querySelector('.yt-thumb-dl-btn')) return;
+        // Generate a unique ID for the element
+        const elementId = videoElement.id || 
+                         videoElement.dataset.videoId || 
+                         Math.random().toString(36).substring(2, 15);
         
-
-        let thumbnailContainer = null;
-        let videoLink = null;
+        // Skip if already processed
+        if (processedIds.has(elementId)) return;
+        processedIds.set(elementId, true);
         
-
-        const thumbnailSelectors = [
+        // Find thumbnail container with multiple selector strategies
+        let thumbnail = null;
+        const selectors = [
             'ytd-thumbnail',
-            '.ytd-thumbnail',
             '#thumbnail',
+            '.ytd-thumbnail',
             'a[href*="/watch"]'
         ];
         
-        for (const selector of thumbnailSelectors) {
+        // Try each selector
+        for (const selector of selectors) {
             const element = videoElement.querySelector(selector);
             if (element) {
-                if (element.tagName === 'A' && element.href) {
-                    videoLink = element;
-                    thumbnailContainer = element.closest('ytd-thumbnail') || element;
+                if (element.tagName === 'A') {
+                    thumbnail = element.closest('ytd-thumbnail') || element;
                 } else {
-                    thumbnailContainer = element;
-                    videoLink = element.querySelector('a[href*="/watch"]') || 
-                               element.closest('a[href*="/watch"]') ||
-                               videoElement.querySelector('a[href*="/watch"]');
+                    thumbnail = element;
                 }
-                if (thumbnailContainer && videoLink) break;
+                if (thumbnail) break;
             }
         }
         
-        if (!videoLink || !thumbnailContainer) {
-            console.log('No thumbnail or video link found');
-            return;
-        }
+        if (!thumbnail) return;
         
-        const videoId = getVideoIdFromHref(videoLink.href);
-        if (!videoId) {
-            console.log('Could not extract video ID from', videoLink.href);
-            return;
-        }
+        // Find video link and extract ID
+        const videoLink = thumbnail.querySelector('a[href*="/watch"]') || 
+                         videoElement.querySelector('a[href*="/watch"]');
         
-
+        const videoId = videoLink ? getVideoId(videoLink.href) : null;
+        if (!videoId) return;
+        
+        // Skip if button already exists on this thumbnail
+        if (thumbnail.querySelector('.yt-thumb-dl-btn')) return;
+        
+        // Create download button
         const button = document.createElement('button');
-        button.innerHTML = '⬇️';
+        button.innerHTML = '⬇';
         button.className = 'yt-thumb-dl-btn';
         button.title = 'Download thumbnail';
+        button.setAttribute('data-video-id', videoId);
         
-
-        Object.assign(button.style, {
-            position: 'absolute',
-            top: '8px',
-            right: '8px',
-            background: 'rgba(0, 0, 0, 0.7)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            padding: '4px 8px',
-            fontSize: '14px',
-            cursor: 'pointer',
-            zIndex: '1000',
-            opacity: '0.8',
-            transition: 'opacity 0.2s'
-        });
+        // Improved button styling for better visibility
+        button.style.cssText = `
+            position: absolute; top: 8px; right: 8px; 
+            background: rgba(0,0,0,.7); color: white; 
+            border: none; border-radius: 4px; padding: 4px 8px;
+            font-size: 14px; cursor: pointer; z-index: 9999;
+            opacity: .8; transition: opacity .2s;
+        `;
         
-        button.addEventListener('mouseenter', () => button.style.opacity = '1');
-        button.addEventListener('mouseleave', () => button.style.opacity = '0.8');
+        button.onmouseenter = () => button.style.opacity = '1';
+        button.onmouseleave = () => button.style.opacity = '.8';
         
-        button.addEventListener('click', async (e) => {
+        // Open thumbnail in new tab
+        button.onclick = (e) => {
             e.preventDefault();
             e.stopPropagation();
             
-            const thumbs = buildThumbs(videoId);
-            
-           
-            for (const thumb of thumbs) {
-                try {
-                    const img = new Image();
-                    img.onload = () => {
-                        download(thumb.url, `${videoId}.jpg`);
-                        console.log('Downloaded thumbnail:', thumb.url);
-                    };
-                    img.onerror = () => {
-                        console.log('Thumbnail not available:', thumb.url);
-                    };
-                    img.src = thumb.url;
-                    break; 
-                } catch (err) {
-                    console.error('Error downloading thumbnail:', err);
-                }
-            }
-        });
+            const urls = getThumbnailUrls(videoId);
+            window.open(urls[0], '_blank');
+        };
         
-
-        if (getComputedStyle(thumbnailContainer).position === 'static') {
-            thumbnailContainer.style.position = 'relative';
+        // Ensure thumbnail container has relative positioning
+        if (getComputedStyle(thumbnail).position === 'static') {
+            thumbnail.style.position = 'relative';
         }
         
-        thumbnailContainer.appendChild(button);
-        console.log('Added download button for video', videoId);
+        thumbnail.appendChild(button);
     }
     
-    function scanForVideos() {
-        const videoSelectors = [
-            'ytd-rich-item-renderer',
-            'ytd-grid-video-renderer',
-            'ytd-video-renderer',
-            'ytd-compact-video-renderer'
-        ];
-        
-        const videos = document.querySelectorAll(videoSelectors.join(', '));
-        console.log(`Found ${videos.length} video elements`);
-        
-        videos.forEach(addDownloadButton);
+    // Improved scanning with more comprehensive selectors
+    let scanTimeout;
+    function scanVideos() {
+        clearTimeout(scanTimeout);
+        scanTimeout = setTimeout(() => {
+            // More comprehensive selector list
+            const selectors = [
+                'ytd-rich-item-renderer',
+                'ytd-grid-video-renderer', 
+                'ytd-video-renderer',
+                'ytd-compact-video-renderer',
+                'ytd-playlist-renderer',
+                'ytd-playlist-panel-video-renderer',
+                'ytd-video-preview',
+                'ytd-channel-video-renderer'
+            ];
+            
+            const videos = document.querySelectorAll(selectors.join(', '));
+            console.log(`YouTube Thumbnail Downloader: Found ${videos.length} video elements`);
+            
+            // Process videos in batches to avoid blocking UI
+            const processVideoBatch = (startIndex, batchSize) => {
+                const endIndex = Math.min(startIndex + batchSize, videos.length);
+                
+                for (let i = startIndex; i < endIndex; i++) {
+                    addDownloadButton(videos[i]);
+                }
+                
+                // Process next batch if there are more videos
+                if (endIndex < videos.length) {
+                    setTimeout(() => {
+                        processVideoBatch(endIndex, batchSize);
+                    }, 0);
+                }
+            };
+            
+            // Start processing in batches of 10
+            processVideoBatch(0, 10);
+        }, 100); // Reduced delay for faster response
     }
     
-
-    setTimeout(() => {
-        scanForVideos();
-    }, 2000);
-    
-
+    // Enhanced mutation observer with more targeted detection
     const observer = new MutationObserver((mutations) => {
-        let hasNewVideos = false;
+        let shouldScan = false;
         
-        mutations.forEach(mutation => {
-            mutation.addedNodes.forEach(node => {
-                if (node.nodeType === 1) { 
-                    if (node.matches && node.matches('ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-video-renderer, ytd-compact-video-renderer')) {
-                        hasNewVideos = true;
-                    } else if (node.querySelector) {
-                        const videos = node.querySelectorAll('ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-video-renderer, ytd-compact-video-renderer');
-                        if (videos.length > 0) hasNewVideos = true;
+        for (const mutation of mutations) {
+            // Check for added nodes
+            if (mutation.addedNodes.length > 0) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === 1) { // Element node
+                        // Check if it's a video container or contains video containers
+                        if (node.tagName && (
+                            node.tagName.startsWith('YTD-') || 
+                            node.id === 'contents' || 
+                            node.id === 'items' ||
+                            node.classList?.contains('ytd-') ||
+                            node.querySelector?.('ytd-thumbnail')
+                        )) {
+                            shouldScan = true;
+                            break;
+                        }
                     }
                 }
-            });
-        });
-        
-        if (hasNewVideos) {
-            setTimeout(scanForVideos, 500);
+            }
+            
+            // Also check for attribute modifications on specific elements
+            if (!shouldScan && mutation.type === 'attributes' && 
+                mutation.target.nodeType === 1 && 
+                mutation.target.tagName && 
+                mutation.target.tagName.startsWith('YTD-')) {
+                shouldScan = true;
+            }
+            
+            if (shouldScan) break;
         }
+        
+        if (shouldScan) scanVideos();
     });
     
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
+    // Initialize with multiple observer targets for better coverage
+    function initialize() {
+        console.log('YouTube Thumbnail Downloader: Initializing...');
+        
+        // Initial scan
+        scanVideos();
+        
+        // Set up observers on multiple key elements
+        const targets = [
+            '#contents', 
+            '#items', 
+            'ytd-browse', 
+            'ytd-watch-flexy',
+            'ytd-page-manager',
+            '#primary'
+        ];
+        
+        let observersAttached = 0;
+        
+        for (const selector of targets) {
+            const target = document.querySelector(selector);
+            if (target) {
+                observer.observe(target, { 
+                    childList: true, 
+                    subtree: true,
+                    attributes: true,
+                    attributeFilter: ['src', 'href', 'data-video-id']
+                });
+                observersAttached++;
+            }
+        }
+        
+        // Fallback to body if no specific targets found
+        if (observersAttached === 0) {
+            observer.observe(document.body, { 
+                childList: true, 
+                subtree: true 
+            });
+        }
+        
+        // Set up periodic scanning for dynamic content
+        setInterval(scanVideos, 3000);
+    }
     
-
-    setInterval(scanForVideos, 5000);
+    // Start with a slight delay to ensure DOM is ready
+    setTimeout(initialize, 500);
+    
+    // Cleanup
+    window.addEventListener('beforeunload', () => observer.disconnect());
     
 })();
